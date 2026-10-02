@@ -10,17 +10,61 @@
   // ---------- storage ----------
   const load = (k, d) => { try { const v = localStorage.getItem(k); return v ? JSON.parse(v) : d; } catch (e) { return d; } };
   const save = (k, v) => { try { localStorage.setItem(k, JSON.stringify(v)); } catch (e) { toast("Could not save (browser storage blocked)"); } };
-  if (!load("wh_init", false)) {
+  // REMOTE mode: data lives in the Google Sheet behind CFG.apiUrl. Otherwise it is demo data in localStorage.
+  const REMOTE = !!CFG.apiUrl;
+  const mem = { ws: [], rq: [], fb: [], st: {}, ratings: {}, loaded: false, failed: false };
+  const session = { get token() { try { return sessionStorage.getItem("wh_token") || ""; } catch (e) { return ""; } }, role: "", name: "" };
+  async function api(body) {
+    const r = await fetch(CFG.apiUrl, { method: "POST", headers: { "Content-Type": "text/plain;charset=utf-8" }, body: JSON.stringify(Object.assign({ token: session.token }, body)) });
+    return r.json();
+  }
+  async function loadPublic() {
+    try {
+      const d = await (await fetch(CFG.apiUrl + "?action=public")).json();
+      mem.ws = d.worksheets; mem.st = d.stats; mem.ratings = d.ratings; mem.loaded = true; mem.failed = false;
+      if (!(session.role && adminReqs)) mem.rq = d.requests;
+    } catch (e) { mem.failed = true; }
+  }
+  let adminReqs = false;
+  async function loadAdmin() {
+    const d = await api({ action: "adminList" });
+    if (!d.ok) { try { sessionStorage.removeItem("wh_token"); } catch (e) {} session.role = ""; adminReqs = false; return false; }
+    mem.rq = d.requests; mem.fb = d.feedback; session.role = d.role; session.name = d.name; adminReqs = true; return true;
+  }
+  if (!REMOTE && !load("wh_init", false)) {
     const seed = CFG.showSampleData ? window.WH_SEED : { worksheets: [], requests: [] };
     save("wh_ws", seed.worksheets); save("wh_rq", seed.requests); save("wh_init", true);
   }
-  const db = {
+  const db = REMOTE ? {
+    ws: () => mem.ws, rq: () => mem.rq, fb: () => mem.fb, st: () => mem.st
+  } : {
     ws: () => load("wh_ws", []), rq: () => load("wh_rq", []), fb: () => load("wh_fb", []), st: () => load("wh_st", {}),
     setWs: (v) => save("wh_ws", v), setRq: (v) => save("wh_rq", v), setFb: (v) => save("wh_fb", v), setSt: (v) => save("wh_st", v)
   };
   const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
   const today = () => new Date().toISOString().slice(0, 10);
-  const bump = (id, key) => { const s = db.st(); s[id] = s[id] || { views: 0, downloads: 0 }; s[id][key]++; db.setSt(s); };
+  const bump = (id, key) => {
+    const s = db.st(); s[id] = s[id] || { views: 0, downloads: 0 }; s[id][key]++;
+    if (REMOTE) api({ action: "track", id, kind: key }).catch(() => {}); else db.setSt(s);
+  };
+  const ratingInfo = (id) => {
+    if (REMOTE) { const r = mem.ratings[id || "_all"]; return r && r.n ? { avg: (r.sum / r.n).toFixed(1), n: r.n } : null; }
+    const l = db.fb().filter((f) => f.rating && (!id || f.wsId === id)); return l.length ? { avg: (l.reduce((a, f) => a + f.rating, 0) / l.length).toFixed(1), n: l.length } : null;
+  };
+  const sendFeedback = (o) => {
+    if (REMOTE) return api(Object.assign({ action: "feedback" }, o));
+    const fb = db.fb(); fb.push({ id: uid(), date: today(), ...o }); db.setFb(fb); return Promise.resolve({ ok: true });
+  };
+  async function uploadFile(file) {
+    if (!file) return null;
+    if (file.size > 20 * 1024 * 1024) { toast("File too large (max 20 MB)"); return null; }
+    if (!REMOTE) { toast("Uploads need the backend (set apiUrl in config.js)"); return null; }
+    toast("Uploading…");
+    const data = await new Promise((res, rej) => { const fr = new FileReader(); fr.onload = () => res(String(fr.result).split(",")[1]); fr.onerror = rej; fr.readAsDataURL(file); });
+    const d = await api({ action: "upload", filename: file.name, mime: file.type || "application/pdf", data });
+    if (!d.ok) { toast(d.error || "Upload failed"); return null; }
+    toast("Uploaded ✔"); return d.url;
+  }
   const pop = (w) => { const s = db.st()[w.id] || {}; return (s.views || 0) + (s.downloads || 0) * 2; };
 
   // ---------- helpers ----------
@@ -152,8 +196,7 @@
     },
 
     feedback() {
-      const fb = db.fb(); const rated = fb.filter((f) => f.rating);
-      const avg = rated.length ? (rated.reduce((a, f) => a + f.rating, 0) / rated.length).toFixed(1) : "–";
+      const ri = ratingInfo(); const avg = ri ? ri.avg : "–";
       return `<div class="wrap"><div class="page-head" style="text-align:center"><h1>Feedback</h1><p class="muted">Tell us how to make WorksheetHub better. Average worksheet rating so far: <b>${avg} ⭐</b></p></div>
       <form class="form" id="genFb">
         <label class="f">Your feedback<textarea name="text" required maxlength="800" placeholder="What do you like? What could be better? Found a mistake?"></textarea></label>
@@ -165,8 +208,7 @@
       const w = db.ws().find((x) => x.id === id);
       if (!w) return `<div class="wrap"><div class="empty" style="margin-top:40px">Worksheet not found. <a href="#/worksheets">Back to worksheets</a></div></div>`;
       bump(w.id, "views");
-      const fbs = db.fb().filter((f) => f.wsId === w.id && f.rating);
-      const avg = fbs.length ? (fbs.reduce((a, f) => a + f.rating, 0) / fbs.length).toFixed(1) : null;
+      const ri = ratingInfo(w.id); const avg = ri && ri.avg; const fbs = { length: ri ? ri.n : 0 };
       return `<div class="wrap" style="max-width:800px"><div class="page-head"><a class="crumb" href="#/worksheets">← All worksheets</a>
       <div class="tags"><span class="tag">${ICONS[w.subject] || "📝"} ${esc(w.subject)}</span><span class="tag grey">${esc(w.grade)}</span><span class="tag ${esc(w.difficulty)}">${esc(w.difficulty)}</span></div>
       <h1 style="margin-top:10px">${esc(w.title)}</h1>
@@ -183,14 +225,14 @@
     },
 
     admin() {
-      if (sessionStorage.getItem("wh_admin") !== "1") {
-        return `<div class="wrap"><form class="form" id="loginForm" style="margin-top:40px;max-width:420px"><h2>🔒 Admin login</h2>
-        <label class="f">Password<input type="password" name="pw" required autofocus></label><button class="btn">Log in</button>
-        <p class="meta">This is a simple gate stored in config.js – not real security. See README.</p></form></div>`;
+      if (REMOTE ? !session.role : sessionStorage.getItem("wh_admin") !== "1") {
+        return `<div class="wrap"><form class="form" id="loginForm" style="margin-top:40px;max-width:420px"><h2>🔒 Admin / contributor login</h2>
+        <label class="f">${REMOTE ? "Access token (from the Users sheet)" : "Password"}<input type="password" name="pw" required autofocus autocomplete="off"></label><button class="btn">Log in</button>
+        <p class="meta">${REMOTE ? "Only people listed in the Users sheet can log in." : "Demo mode: no backend connected, so this is only a simple gate. See README."}</p></form></div>`;
       }
       const tab = adminTab;
       const tabs = ["Impact", "Requests", "Add Worksheet", "Manage Worksheets", "Data"];
-      return `<div class="wrap"><div class="page-head"><h1>Admin Dashboard</h1></div>
+      return `<div class="wrap"><div class="page-head"><h1>Admin Dashboard</h1>${REMOTE ? `<p class="muted">Signed in as <b>${esc(session.name)}</b> (${esc(session.role)}). <a href="${esc(CFG.sheetUrl || "https://docs.google.com/spreadsheets")}" target="_blank" rel="noopener">Open the Google Sheet ↗</a></p>` : ""}</div>
       <div class="tabs">${tabs.map((t) => `<button class="${t === tab ? "on" : ""}" data-tab="${t}">${t}</button>`).join("")}<button data-tab="__logout" style="margin-left:auto">Log out</button></div>
       <div id="adminBody">${adminViews[tab]()}</div></div>`;
     }
@@ -223,9 +265,9 @@
       if (!rq.length) return `<div class="empty">No requests yet.</div>`;
       return `<div class="tablewrap"><table><tr><th>Date</th><th>Subject</th><th>Grade</th><th>Topic</th><th>Difficulty</th><th>Type</th><th>Additional info</th><th>Status</th><th>GitHub worksheet link</th><th></th></tr>
       ${rq.map((r) => `<tr data-rid="${esc(r.id)}"><td>${fmtDate(r.date)}</td><td>${esc(r.subject)}</td><td>${esc(r.grade)}</td><td><b>${esc(r.topic)}</b></td><td>${esc(r.difficulty)}</td><td>${esc(r.type)}</td><td style="max-width:240px">${esc(r.info) || "<span class='muted'>–</span>"}</td>
-      <td><select data-status>${opts(STATUSES, r.status)}</select></td><td><input type="url" data-link placeholder="https://github.com/…" value="${esc(r.link)}"></td>
-      <td style="white-space:nowrap"><button class="btn sm" data-save>Save</button> <button class="btn sm danger" data-delreq>✕</button></td></tr>`).join("")}</table></div>
-      <p class="meta">Tip: after adding a worksheet in "Add Worksheet", paste its link here (or use #/worksheet/ID) and set the status to Completed.</p>`;
+      <td><select data-status>${opts(STATUSES, r.status)}</select></td><td><input type="url" data-link placeholder="https://github.com/… or upload →" value="${esc(r.link)}">${REMOTE ? `<input type="file" data-up accept=".pdf,.doc,.docx,.png,.jpg" style="margin-top:6px">` : ""}</td>
+      <td style="white-space:nowrap"><button class="btn sm" data-save>Save</button> ${!REMOTE || session.role === "admin" ? `<button class="btn sm danger" data-delreq>✕</button>` : ""}</td></tr>`).join("")}</table></div>
+      <p class="meta">Tip: choose a finished PDF in the row's upload box (it fills the link), set the status to Completed, then Save. To show it in the library, also add it under "Add Worksheet".</p>`;
     },
     "Add Worksheet"() {
       return `<form class="form" id="addForm" style="margin:0"><h2>Add a worksheet</h2>
@@ -233,8 +275,10 @@
       <div class="row"><label class="f">Subject<select name="subject">${opts(SUBJECTS)}</select></label><label class="f">Grade<select name="grade">${opts(GRADES)}</select></label></div>
       <div class="row"><label class="f">Topic<input type="text" name="topic" required></label><label class="f">Difficulty<select name="difficulty">${opts(DIFFS, "Medium")}</select></label></div>
       <label class="f">Description<textarea name="description" required></textarea></label>
-      <label class="f">GitHub PDF/file link<input type="url" name="file" required placeholder="https://github.com/you/repo/blob/main/worksheets/math/grade6/fractions.pdf"></label>
+      <label class="f">GitHub PDF/file link${REMOTE ? " (or upload a file below to fill this in)" : ""}<input type="url" name="file" required placeholder="https://github.com/you/repo/blob/main/worksheets/math/grade6/fractions.pdf"></label>
+      ${REMOTE ? `<label class="f">Upload worksheet file<input type="file" data-upf accept=".pdf,.doc,.docx"></label>` : ""}
       <label class="f">Answer sheet link (optional)<input type="url" name="answers"></label>
+      ${REMOTE ? `<label class="f">Upload answer sheet<input type="file" data-upa accept=".pdf,.doc,.docx"></label>` : ""}
       <label class="f" style="flex-direction:row;align-items:center;gap:10px"><input type="checkbox" name="reviewed" required style="width:auto"> I have reviewed this worksheet and checked the answers</label>
       <button class="btn">Publish worksheet</button></form>`;
     },
@@ -243,9 +287,11 @@
       if (!ws.length) return `<div class="empty">No worksheets yet.</div>`;
       return `<div class="tablewrap"><table><tr><th>ID</th><th>Title</th><th>Subject</th><th>Grade</th><th>Views</th><th>Downloads</th><th></th></tr>
       ${ws.map((w) => `<tr><td><code>${esc(w.id)}</code></td><td>${esc(w.title)}</td><td>${esc(w.subject)}</td><td>${esc(w.grade)}</td><td>${(st[w.id] || {}).views || 0}</td><td>${(st[w.id] || {}).downloads || 0}</td>
-      <td><button class="btn sm danger" data-delws="${esc(w.id)}">Delete</button></td></tr>`).join("")}</table></div>`;
+      <td>${!REMOTE || session.role === "admin" ? `<button class="btn sm danger" data-delws="${esc(w.id)}">Delete</button>` : ""}</td></tr>`).join("")}</table></div>`;
     },
     Data() {
+      if (REMOTE) return `<div class="card" style="gap:14px"><h2>Your data</h2><p>Everything lives in your Google Sheet (tabs: Requests, Worksheets, Feedback, Users). Edit it directly there. To get an Excel copy: File → Download → Microsoft Excel (.xlsx). To add a contributor, add a row in the <b>Users</b> sheet with a name, a long random token and the role <code>contributor</code>.</p>
+      <div class="actions"><a class="btn" href="${esc(CFG.sheetUrl || "https://docs.google.com/spreadsheets")}" target="_blank" rel="noopener">Open Google Sheet ↗</a></div></div>`;
       return `<div class="card" style="gap:14px"><h2>Backup & GitHub export</h2>
       <p>Data on this site is stored in this browser. Use these buttons to keep a copy (and commit <code>worksheets.json</code> to GitHub for your records).</p>
       <div class="actions"><button class="btn" data-export="ws">Export worksheets.json</button><button class="btn" data-export="rq">Export requests.json</button><button class="btn ghost" data-export="fb">Export feedback.json</button></div>
@@ -291,12 +337,19 @@
     }
     if (route === "request") $("#reqForm").addEventListener("submit", (e) => {
       e.preventDefault(); const d = Object.fromEntries(new FormData(e.target));
-      const rq = db.rq(); rq.push({ id: uid(), subject: d.subject, grade: d.grade, topic: d.topic.trim(), difficulty: d.difficulty, type: d.type, info: (d.info || "").trim(), date: today(), status: "Requested", link: "" });
+      const row = { subject: d.subject, grade: d.grade, topic: d.topic.trim(), difficulty: d.difficulty, type: d.type, info: (d.info || "").trim() };
+      if (REMOTE) {
+        const btn = $("button[type=submit]", e.target); btn.disabled = true; btn.textContent = "Sending…";
+        api(Object.assign({ action: "request" }, row)).then((r) => { if (!r.ok) throw new Error(r.error); return loadPublic(); }).then(() => (location.hash = "#/confirmed"))
+          .catch(() => { btn.disabled = false; btn.textContent = "Submit Request"; toast("Could not send. Please try again."); });
+        return;
+      }
+      const rq = db.rq(); rq.push(Object.assign({ id: uid(), date: today(), status: "Requested", link: "" }, row));
       db.setRq(rq); location.hash = "#/confirmed";
     });
     if (route === "feedback") $("#genFb").addEventListener("submit", (e) => {
-      e.preventDefault(); const fb = db.fb(); fb.push({ id: uid(), wsId: null, text: new FormData(e.target).get("text").trim(), date: today() }); db.setFb(fb);
-      e.target.reset(); toast("Thank you for your feedback!");
+      e.preventDefault(); const f = e.target;
+      sendFeedback({ wsId: null, text: new FormData(f).get("text").trim() }).then(() => { f.reset(); toast("Thank you for your feedback!"); }).catch(() => toast("Could not send. Please try again."));
     });
     if (route === "worksheet") bindFeedback(arg);
     if (route === "admin") bindAdmin();
@@ -310,37 +363,60 @@
     $("#fbSend").addEventListener("click", () => {
       const text = $("#fbText").value.trim();
       if (helpful === null && !rating && !text) return toast("Pick a rating, 👍/👎 or write something first");
-      const fb = db.fb(); fb.push({ id: uid(), wsId: id, helpful, rating, text, date: today() }); db.setFb(fb);
-      box.innerHTML = `<h3>Thank you! 🎉</h3><p>Your feedback helps us improve future worksheets.</p>`;
+      sendFeedback({ wsId: id, helpful, rating, text }).then(() => { box.innerHTML = `<h3>Thank you! 🎉</h3><p>Your feedback helps us improve future worksheets.</p>`; }).catch(() => toast("Could not send. Please try again."));
     });
   }
 
+  async function refresh() { await loadPublic(); if (REMOTE && session.role) await loadAdmin(); render(); }
+  const guard = (fn) => async (...a) => { try { await fn(...a); } catch (e) { toast("Something went wrong. Check your connection and try again."); } };
+
   function bindAdmin() {
     const lf = $("#loginForm");
-    if (lf) return lf.addEventListener("submit", (e) => {
-      e.preventDefault();
-      if (new FormData(lf).get("pw") === CFG.adminPassword) { sessionStorage.setItem("wh_admin", "1"); render(); } else toast("Wrong password");
-    });
+    if (lf) return lf.addEventListener("submit", guard(async (e) => {
+      e.preventDefault(); const pw = new FormData(lf).get("pw");
+      if (REMOTE) {
+        try { sessionStorage.setItem("wh_token", pw); } catch (x) {}
+        if (await loadAdmin()) render(); else toast("Invalid token");
+      } else if (pw === CFG.adminPassword) { sessionStorage.setItem("wh_admin", "1"); render(); } else toast("Wrong password");
+    }));
     document.querySelectorAll("[data-tab]").forEach((b) => b.addEventListener("click", () => {
-      if (b.dataset.tab === "__logout") { sessionStorage.removeItem("wh_admin"); return render(); }
+      if (b.dataset.tab === "__logout") { sessionStorage.removeItem("wh_admin"); sessionStorage.removeItem("wh_token"); session.role = ""; adminReqs = false; return REMOTE ? refresh() : render(); }
       adminTab = b.dataset.tab; render();
     }));
     document.querySelectorAll("[data-rid]").forEach((tr) => {
-      $("[data-save]", tr).addEventListener("click", () => {
-        const rq = db.rq(); const r = rq.find((x) => x.id === tr.dataset.rid);
-        r.status = $("[data-status]", tr).value; r.link = $("[data-link]", tr).value.trim();
-        if (r.status === "Completed" && !safeUrl(r.link)) return toast("Add the worksheet link before marking Completed");
-        db.setRq(rq); toast("Saved");
-      });
-      $("[data-delreq]", tr).addEventListener("click", () => { if (confirm("Delete this request?")) { db.setRq(db.rq().filter((x) => x.id !== tr.dataset.rid)); render(); } });
+      const id = tr.dataset.rid;
+      const up = $("[data-up]", tr);
+      if (up) up.addEventListener("change", guard(async () => { const u = await uploadFile(up.files[0]); if (u) { $("[data-link]", tr).value = u; $("[data-status]", tr).value = "Completed"; toast("Uploaded – press Save to finish"); } }));
+      $("[data-save]", tr).addEventListener("click", guard(async () => {
+        const status = $("[data-status]", tr).value, link = $("[data-link]", tr).value.trim();
+        if (status === "Completed" && !safeUrl(link)) return toast("Add the worksheet link before marking Completed");
+        if (REMOTE) { const r = await api({ action: "updateRequest", id, status, link }); if (!r.ok) return toast(r.error); toast("Saved"); return refresh(); }
+        const rq = db.rq(); const r = rq.find((x) => x.id === id); r.status = status; r.link = link; db.setRq(rq); toast("Saved");
+      }));
+      const del = $("[data-delreq]", tr);
+      if (del) del.addEventListener("click", guard(async () => {
+        if (!confirm("Delete this request?")) return;
+        if (REMOTE) { const r = await api({ action: "deleteRequest", id }); if (!r.ok) return toast(r.error); return refresh(); }
+        db.setRq(db.rq().filter((x) => x.id !== id)); render();
+      }));
     });
     const af = $("#addForm");
-    if (af) af.addEventListener("submit", (e) => {
-      e.preventDefault(); const d = Object.fromEntries(new FormData(af)); const ws = db.ws();
-      const id = uid(); ws.push({ id, title: d.title.trim(), subject: d.subject, grade: d.grade, topic: d.topic.trim(), difficulty: d.difficulty, description: d.description.trim(), file: d.file.trim(), answers: (d.answers || "").trim(), date: today() });
-      db.setWs(ws); toast("Published! ID: " + id); adminTab = "Manage Worksheets"; render();
-    });
-    document.querySelectorAll("[data-delws]").forEach((b) => b.addEventListener("click", () => { if (confirm("Delete this worksheet from the site?")) { db.setWs(db.ws().filter((w) => w.id !== b.dataset.delws)); render(); } }));
+    if (af) {
+      const fill = (sel, name) => { const i = $(sel, af); if (i) i.addEventListener("change", guard(async () => { const u = await uploadFile(i.files[0]); if (u) af.elements[name].value = u; })); };
+      fill("[data-upf]", "file"); fill("[data-upa]", "answers");
+      af.addEventListener("submit", guard(async (e) => {
+        e.preventDefault(); const d = Object.fromEntries(new FormData(af));
+        const w = { title: d.title.trim(), subject: d.subject, grade: d.grade, topic: d.topic.trim(), difficulty: d.difficulty, description: d.description.trim(), file: d.file.trim(), answers: (d.answers || "").trim() };
+        if (REMOTE) { const r = await api(Object.assign({ action: "addWorksheet" }, w)); if (!r.ok) return toast(r.error); toast("Published! ID: " + r.id); adminTab = "Manage Worksheets"; return refresh(); }
+        const ws = db.ws(); const id = uid(); ws.push(Object.assign({ id, date: today() }, w));
+        db.setWs(ws); toast("Published! ID: " + id); adminTab = "Manage Worksheets"; render();
+      }));
+    }
+    document.querySelectorAll("[data-delws]").forEach((b) => b.addEventListener("click", guard(async () => {
+      if (!confirm("Delete this worksheet from the site?")) return;
+      if (REMOTE) { const r = await api({ action: "deleteWorksheet", id: b.dataset.delws }); if (!r.ok) return toast(r.error); return refresh(); }
+      db.setWs(db.ws().filter((w) => w.id !== b.dataset.delws)); render();
+    })));
     document.querySelectorAll("[data-export]").forEach((b) => b.addEventListener("click", () => {
       const k = b.dataset.export, data = db[k](); const name = { ws: "worksheets", rq: "requests", fb: "feedback" }[k] + ".json";
       const a = document.createElement("a"); a.href = URL.createObjectURL(new Blob([JSON.stringify(data, null, 2)], { type: "application/json" })); a.download = name; a.click();
@@ -358,5 +434,13 @@
   });
   $("#burger").addEventListener("click", () => $("#menu").classList.toggle("open"));
   window.addEventListener("hashchange", render);
-  render();
+  if (REMOTE) {
+    app.innerHTML = '<div class="wrap"><div class="empty" style="margin-top:40px">Loading…</div></div>';
+    (async () => {
+      await loadPublic();
+      if (session.token) await loadAdmin();
+      if (mem.failed) toast("Could not reach the server. Showing nothing for now.");
+      render();
+    })();
+  } else render();
 })();

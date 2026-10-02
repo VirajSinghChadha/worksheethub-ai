@@ -12,9 +12,9 @@ Requests go into a Google Sheet that only you (and people you add) can edit. It 
 6. Put the URL in `config.js` as `apiUrl`, and the sheet's address as `sheetUrl`. Set `showSampleData: false`. Push to GitHub.
 7. Open the site > footer "Admin" and log in with your token.
 
-## Contributors
+## Contributors and admins
 Add a row in the Users tab: name, a long random token (any random string, 20+ characters), role `contributor`.
-Contributors can see and edit requests, upload files and add worksheets. Only admins can delete.
+Contributors and admins can see and edit requests, upload files and add worksheets. Only admins can delete.
 Remove their row to revoke access.
 
 ## Notes

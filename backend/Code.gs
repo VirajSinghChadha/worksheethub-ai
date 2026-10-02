@@ -4,7 +4,7 @@
  * Roles: admin (everything) and contributor (view/edit requests, upload files, add worksheets; cannot delete).
  */
 const HEADERS = {
-  Requests: ['ID', 'Date', 'Subject', 'Grade', 'Topic', 'Difficulty', 'Type', 'Info', 'Status', 'Worksheet Link', 'Updated By'],
+  Requests: ['ID', 'Date', 'Subject', 'Grade', 'Topic', 'Difficulty', 'Type', 'Info', 'Status', 'Worksheet Link', 'Updated By', 'Full Name'],
   Worksheets: ['ID', 'Title', 'Subject', 'Grade', 'Topic', 'Difficulty', 'Description', 'File', 'Answers', 'Date', 'Added By', 'Views', 'Downloads'],
   Feedback: ['Date', 'Worksheet ID', 'Helpful', 'Rating', 'Text'],
   Users: ['Name', 'Token', 'Role']
@@ -111,10 +111,12 @@ function doPost(e) {
 
 function request_(b) {
   const topic = clean_(b.topic, 80); if (!topic) return { ok: false, error: 'Topic required' };
+  const name = clean_(b.fullName, 80); if (!name) return { ok: false, error: 'Full name required' };
   const sh = sheet_('Requests');
+  if (!sh.getRange(1, 12).getValue()) sh.getRange(1, 12).setValue('Full Name').setFontWeight('bold').setBackground('#dbeafe');
   if (sh.getLastRow() > 5000) return { ok: false, error: 'Too many requests right now' };
   sh.appendRow([id_(), today_(), oneOf_(b.subject, SUBJECTS, 'Other'), oneOf_(b.grade, GRADES, 'Grade 6'), topic,
-    oneOf_(b.difficulty, DIFFS, 'Mixed'), oneOf_(b.type, TYPES, 'Mixed questions'), clean_(b.info, 600), 'Requested', '', '']);
+    oneOf_(b.difficulty, DIFFS, 'Mixed'), oneOf_(b.type, TYPES, 'Mixed questions'), clean_(b.info, 600), 'Requested', '', '', name]);
   return { ok: true };
 }
 function feedback_(b) {
@@ -132,7 +134,7 @@ function track_(b) {
 function adminList_(b, u) {
   const rq = rows_('Requests').map(function (r) {
     return { id: r.ID, date: r.Date, subject: r.Subject, grade: r.Grade, topic: r.Topic, difficulty: r.Difficulty, type: r.Type,
-      info: r.Info, status: r.Status, link: r['Worksheet Link'], updatedBy: r['Updated By'] };
+      info: r.Info, status: r.Status, link: r['Worksheet Link'], updatedBy: r['Updated By'], fullName: r['Full Name'] || '' };
   });
   const fb = rows_('Feedback').map(function (f) {
     return { date: f.Date, wsId: f['Worksheet ID'] || null, helpful: f.Helpful === 'Yes' ? true : f.Helpful === 'No' ? false : null, rating: +f.Rating || 0, text: f.Text };

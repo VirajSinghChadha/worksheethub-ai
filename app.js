@@ -149,12 +149,14 @@
     },
 
     request() {
-      return `<div class="wrap section"><div class="page-head" style="text-align:center"><h1>Request a Worksheet</h1><p class="muted">Tell us what you need help with. Please don't include your name or personal details.</p></div>
+      return `<div class="wrap section"><div class="page-head" style="text-align:center"><h1>Request a Worksheet</h1><p class="muted">Tell us what you need help with. Your name is only seen by the admins, never shown publicly.</p></div>
       <form class="form" id="reqForm">
         <div class="row">
           <label class="f">Subject<select name="subject" required><option value="">Choose…</option>${opts([...SUBJECTS, "Other"])}</select></label>
           <label class="f">Grade<select name="grade" required><option value="">Choose…</option>${opts(GRADES)}</select></label>
         </div>
+        <label class="f">Your full name<input type="text" name="fullName" required maxlength="80" autocomplete="name" placeholder="e.g. Alex Smith">
+          <span class="meta" style="font-weight:400">🔒 Your name is private. It is only seen by the website admins and is never shown publicly.</span></label>
         <label class="f">Topic<input type="text" name="topic" required maxlength="80" placeholder="e.g. Fractions, Photosynthesis, Creative writing"></label>
         <div class="row">
           <label class="f">Difficulty<select name="difficulty" required>${opts(DIFFS, "Medium")}</select></label>
@@ -263,8 +265,8 @@
     Requests() {
       const rq = db.rq().slice().sort((a, b) => b.date.localeCompare(a.date));
       if (!rq.length) return `<div class="empty">No requests yet.</div>`;
-      return `<div class="tablewrap"><table><tr><th>Date</th><th>Subject</th><th>Grade</th><th>Topic</th><th>Difficulty</th><th>Type</th><th>Additional info</th><th>Status</th><th>GitHub worksheet link</th><th></th></tr>
-      ${rq.map((r) => `<tr data-rid="${esc(r.id)}"><td>${fmtDate(r.date)}</td><td>${esc(r.subject)}</td><td>${esc(r.grade)}</td><td><b>${esc(r.topic)}</b></td><td>${esc(r.difficulty)}</td><td>${esc(r.type)}</td><td style="max-width:240px">${esc(r.info) || "<span class='muted'>–</span>"}</td>
+      return `<div class="tablewrap"><table><tr><th>Date</th><th>Student</th><th>Subject</th><th>Grade</th><th>Topic</th><th>Difficulty</th><th>Type</th><th>Additional info</th><th>Status</th><th>GitHub worksheet link</th><th></th></tr>
+      ${rq.map((r) => `<tr data-rid="${esc(r.id)}"><td>${fmtDate(r.date)}</td><td>${esc(r.fullName) || "<span class='muted'>–</span>"}</td><td>${esc(r.subject)}</td><td>${esc(r.grade)}</td><td><b>${esc(r.topic)}</b></td><td>${esc(r.difficulty)}</td><td>${esc(r.type)}</td><td style="max-width:240px">${esc(r.info) || "<span class='muted'>–</span>"}</td>
       <td><select data-status>${opts(STATUSES, r.status)}</select></td><td><input type="url" data-link placeholder="https://github.com/… or upload →" value="${esc(r.link)}">${REMOTE ? `<input type="file" data-up accept=".pdf,.doc,.docx,.png,.jpg" style="margin-top:6px">` : ""}</td>
       <td style="white-space:nowrap"><button class="btn sm" data-save>Save</button> ${!REMOTE || session.role === "admin" ? `<button class="btn sm danger" data-delreq>✕</button>` : ""}</td></tr>`).join("")}</table></div>
       <p class="meta">Tip: choose a finished PDF in the row's upload box (it fills the link), set the status to Completed, then Save. To show it in the library, also add it under "Add Worksheet".</p>`;
@@ -337,7 +339,7 @@
     }
     if (route === "request") $("#reqForm").addEventListener("submit", (e) => {
       e.preventDefault(); const d = Object.fromEntries(new FormData(e.target));
-      const row = { subject: d.subject, grade: d.grade, topic: d.topic.trim(), difficulty: d.difficulty, type: d.type, info: (d.info || "").trim() };
+      const row = { fullName: d.fullName.trim(), subject: d.subject, grade: d.grade, topic: d.topic.trim(), difficulty: d.difficulty, type: d.type, info: (d.info || "").trim() };
       if (REMOTE) {
         const btn = $("button[type=submit]", e.target); btn.disabled = true; btn.textContent = "Sending…";
         api(Object.assign({ action: "request" }, row)).then((r) => { if (!r.ok) throw new Error(r.error); return loadPublic(); }).then(() => (location.hash = "#/confirmed"))

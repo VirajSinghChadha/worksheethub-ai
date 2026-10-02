@@ -18,7 +18,7 @@ const FOLDER_NAME = 'WorksheetHub Files';
 const MAX_UPLOAD_BYTES = 20 * 1024 * 1024;
 
 function setup() {
-  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const ss = ss_();
   Object.keys(HEADERS).forEach(function (name) {
     const sh = ss.getSheetByName(name) || ss.insertSheet(name);
     sh.getRange(1, 1, 1, HEADERS[name].length).setValues([HEADERS[name]]).setFontWeight('bold').setBackground('#dbeafe');
@@ -31,12 +31,21 @@ function setup() {
   if (users.getLastRow() < 2) users.appendRow(['Admin', Utilities.getUuid(), 'admin']);
   getFolder_();
   const msg = 'Setup done. Your admin token is in the Users sheet (column B). Now: Deploy > New deployment > Web app.';
-  Logger.log(msg);
-  try { SpreadsheetApp.getUi().alert(msg); } catch (e) {}
+  Logger.log(msg + ' Sheet: ' + ss.getUrl());
+  
 }
 
 // ---------- helpers ----------
-function sheet_(n) { return SpreadsheetApp.getActiveSpreadsheet().getSheetByName(n); }
+function ss_() {
+  const props = PropertiesService.getScriptProperties();
+  const id = props.getProperty('SHEET_ID');
+  if (id) return SpreadsheetApp.openById(id);
+  const active = SpreadsheetApp.getActiveSpreadsheet();
+  const ss = active || SpreadsheetApp.create('WorksheetHub AI Data');
+  props.setProperty('SHEET_ID', ss.getId());
+  return ss;
+}
+function sheet_(n) { return ss_().getSheetByName(n); }
 function fmtDate_(v) { return v instanceof Date ? Utilities.formatDate(v, 'UTC', 'yyyy-MM-dd') : String(v || ''); }
 function today_() { return Utilities.formatDate(new Date(), 'UTC', 'yyyy-MM-dd'); }
 function rows_(name) {

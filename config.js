@@ -5,9 +5,9 @@ window.WH_CONFIG = {
   // Admin password for #/admin. NOTE: this is client-side only (a simple gate, not real security).
   adminPassword: "changeme",
   // Set true to show demo worksheets/requests so the site isn't empty. Set false when you go live.
-  showSampleData: true,
+  showSampleData: false,
   // Paste your Google Apps Script web app URL here (see SETUP.md). Leave "" for demo mode (browser-only data).
-  apiUrl: "",
+  apiUrl: "https://script.google.com/macros/s/AKfycbzrNm548s7GBi1HtaRVo_cLnzQARW6oVnejrDftKH5OHWmL94-zEy-boLnVVoDvzTpp/exec",
   // Link to your Google Sheet (shown to logged-in admins/contributors)
   sheetUrl: ""
 };

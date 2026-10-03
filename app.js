@@ -75,21 +75,31 @@
   const norm = (t) => t.trim().toLowerCase().replace(/\s+/g, " ");
   const $ = (s, r = document) => r.querySelector(s);
   const app = $("#app");
-  function toast(msg) { const t = document.createElement("div"); t.className = "toast"; t.textContent = msg; document.body.appendChild(t); setTimeout(() => t.remove(), 2600); }
+  function toast(msg) {
+    document.querySelectorAll(".toast").forEach((x) => x.remove());
+    const t = document.createElement("div"); t.className = "toast"; t.setAttribute("role", "status"); t.textContent = msg; document.body.appendChild(t);
+    setTimeout(() => t.classList.add("out"), 2400); setTimeout(() => t.remove(), 2800);
+  }
+  // Escape text and highlight current search terms
+  const hl = (raw) => { const terms = norm(filt.q).split(" ").filter((t) => t.length > 1); if (!terms.length) return esc(raw); const re = new RegExp("(" + terms.map((t) => t.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join("|") + ")", "gi"); return String(raw).split(re).map((part, i) => (i % 2 ? `<mark>${esc(part)}</mark>` : esc(part))).join(""); };
+  const busy = (btn, label) => { btn.dataset.label = btn.dataset.label || btn.innerHTML; btn.disabled = !!label; btn.innerHTML = label ? `<span class="spin" aria-hidden="true"></span>${label}` : btn.dataset.label; };
   const statusClass = (s) => s.split(" ")[0];
 
   // ---------- state ----------
   const filt = { q: "", subject: "", grade: "", topic: "", diff: "", sort: "newest" };
 
-  function wsCard(w) {
+  function wsCard(w, mark) {
+    const h = mark ? hl : esc;
+    const ri = ratingInfo(w.id);
     return `<article class="card">
-      <div class="tags"><span class="tag">${ICONS[w.subject] || "📝"} ${esc(w.subject)}</span><span class="tag grey">${esc(w.grade)}</span><span class="tag ${esc(w.difficulty)}">${esc(w.difficulty)}</span></div>
-      <h3>${esc(w.title)}</h3>
-      <div class="meta">Topic: <b>${esc(w.topic)}</b> · Uploaded ${fmtDate(w.date)}</div>
-      <p class="desc">${esc(w.description)}</p>
+      <div class="ws-ico" aria-hidden="true">${ICONS[w.subject] || "📝"}</div>
+      <div class="tags"><span class="tag">${esc(w.subject)}</span><span class="tag grey">${esc(w.grade)}</span><span class="tag ${esc(w.difficulty)}">${esc(w.difficulty)}</span></div>
+      <h3><a href="#/worksheet/${esc(w.id)}">${h(w.title)}</a></h3>
+      <div class="meta">${h(w.topic)} · ${fmtDate(w.date)}${ri ? ` · ★ ${ri.avg}` : ""}${safeUrl(w.answers) ? " · Answers included" : ""}</div>
+      <p class="desc">${h(w.description)}</p>
       <div class="actions">
-        <a class="btn sm" href="#/worksheet/${esc(w.id)}">View Worksheet</a>
-        <a class="btn sm ghost" href="${esc(safeUrl(w.file))}" target="_blank" rel="noopener" data-dl="${esc(w.id)}">⬇ Download PDF</a>
+        <a class="btn sm" href="#/worksheet/${esc(w.id)}">View</a>
+        <a class="btn sm ghost" href="${esc(safeUrl(w.file))}" target="_blank" rel="noopener" data-dl="${esc(w.id)}" aria-label="Download PDF: ${esc(w.title)}">Download PDF</a>
       </div></article>`;
   }
 
@@ -106,49 +116,53 @@
     const t = topicCounts().slice(0, limit);
     if (!t.length) return `<div class="empty">No requests yet. Be the first to request a worksheet!</div>`;
     const max = t[0].n;
-    return `<div class="pop">${t.map((x, i) => `<div class="pop-item"><span class="n">${i + 1}</span><div><b>${esc(x.topic)}</b> <span class="meta">${esc(x.subject)}</span></div><div class="bar"><i style="width:${(x.n / max) * 100}%"></i></div><b>${x.n} request${x.n > 1 ? "s" : ""}</b></div>`).join("")}</div>`;
+    return `<div class="pop">${t.map((x, i) => `<div class="pop-item"><span class="n">${i + 1}</span><div class="lbl"><b>${esc(x.topic)}</b><div class="meta">${esc(x.subject)}</div></div><div class="bar" aria-hidden="true"><i style="width:${(x.n / max) * 100}%"></i></div><span class="cnt">${x.n} request${x.n > 1 ? "s" : ""}</span></div>`).join("")}</div>`;
   }
 
   // ---------- views ----------
   const views = {
     home() {
       const latest = db.ws().slice().sort((a, b) => b.date.localeCompare(a.date)).slice(0, 3);
+      const nWs = db.ws().length, nRq = db.rq().length, nDone = db.rq().filter((r) => r.status === "Completed").length;
       return `
       <div class="hero"><div class="wrap">
-        <h1>WorksheetHub AI</h1>
-        <p class="tag" style="font-size:1.5rem">Request it. We create it. You practise it.</p>
-        <p class="desc">WorksheetHub AI is a student-created platform providing free practice worksheets for younger students. Can't find the worksheet you need? Request one and we may create it for you.</p>
-        <div class="btns"><a class="btn lg" href="#/worksheets">Browse Worksheets</a><a class="btn lg ghost" href="#/request">Request a Worksheet</a></div>
-        <div class="bigsearch"><input id="heroSearch" type="search" placeholder="🔍 Search e.g. Pythagoras, Cells, Fractions…"></div>
+        <span class="eyebrow">Free · Grade 6 & 7 · Checked by humans</span>
+        <h1>WorksheetHub <span class="grad">AI</span></h1>
+        <p class="tagline">Request it. We create it. You practise it.</p>
+        <p class="desc">Free practice worksheets made by students, for students. Can't find what you need? Request it and we may create it for you.</p>
+        <div class="btns"><a class="btn lg" href="#/worksheets">Browse worksheets</a><a class="btn lg ghost" href="#/request">Request a worksheet</a></div>
+        <form class="bigsearch" id="heroForm" role="search"><input id="heroSearch" type="search" aria-label="Search worksheets" placeholder="Try Pythagoras, Percentages, Probability…"></form>
+        ${nWs ? `<div class="hero-stats"><div><b>${nWs}</b>worksheets</div><div><b>${nRq}</b>requests</div><div><b>${nDone}</b>fulfilled</div></div>` : ""}
       </div></div>
-      <section class="block"><div class="wrap"><h2>New Worksheets</h2>
-        ${latest.length ? `<div class="grid">${latest.map(wsCard).join("")}</div>` : `<div class="empty">No worksheets yet – check back soon!</div>`}
-        <p style="margin-top:18px"><a href="#/worksheets">See all worksheets →</a></p></div></section>
-      <section class="block"><div class="wrap"><h2>Most Requested Topics</h2>${popularHtml(5)}</div></section>
-      <section class="block"><div class="wrap"><h2>How It Works</h2><div class="steps">
-        <div class="step"><div class="num">1</div><div class="ico">✍️</div><h3>Request</h3><p>Tell us what worksheet you need.</p></div>
-        <div class="step"><div class="num">2</div><div class="ico">🤖</div><h3>Create</h3><p>AI helps us create the worksheet.</p></div>
-        <div class="step"><div class="num">3</div><div class="ico">✅</div><h3>Review</h3><p>The worksheet is checked before publication.</p></div>
-        <div class="step"><div class="num">4</div><div class="ico">📝</div><h3>Practise</h3><p>The worksheet is uploaded for students to use.</p></div>
+      <section class="block"><div class="wrap"><div class="sec-head"><h2>New worksheets</h2><a href="#/worksheets">See all →</a></div>
+        ${latest.length ? `<div class="grid">${latest.map((w) => wsCard(w)).join("")}</div>` : `<div class="empty"><div class="em-ico">📭</div>No worksheets yet – check back soon!</div>`}</div></section>
+      <div class="wrap">${adHtml()}</div>
+      <section class="block"><div class="wrap"><div class="sec-head"><h2>Most requested topics</h2><a href="#/requests">All requests →</a></div>${popularHtml(5)}</div></section>
+      <section class="block"><div class="wrap"><h2 style="margin-bottom:18px">How it works</h2><div class="steps">
+        <div class="step"><div class="ico">✍️</div><div class="num">Step 1</div><h3>Request</h3><p>Tell us what worksheet you need.</p></div>
+        <div class="step"><div class="ico">🤖</div><div class="num">Step 2</div><h3>Create</h3><p>AI helps us draft the worksheet.</p></div>
+        <div class="step"><div class="ico">✅</div><div class="num">Step 3</div><h3>Review</h3><p>A person checks every question and answer.</p></div>
+        <div class="step"><div class="ico">📝</div><div class="num">Step 4</div><h3>Practise</h3><p>Download it free and get practising.</p></div>
       </div></div></section>`;
     },
 
     worksheets() {
       const topics = [...new Set(db.ws().map((w) => w.topic))].sort();
       return `<div class="wrap"><div class="page-head"><h1>Worksheets</h1><p class="muted">Free practice for Grade 6 and Grade 7. Every worksheet is checked before it is published.</p></div>
-      <input class="bar-search" id="libSearch" type="search" placeholder="🔍 Search worksheets… (Pythagoras, Cells, Fractions, Population)" value="${esc(filt.q)}">
+      <input class="bar-search" id="libSearch" type="search" aria-label="Search worksheets" placeholder="Search title, topic or description" value="${esc(filt.q)}">
+      <div class="chips" role="group" aria-label="Subject">${["", ...SUBJECTS].filter((s) => !s || db.ws().some((w) => w.subject === s)).map((s) => `<button class="chip ${filt.subject === s ? "on" : ""}" data-chip="${esc(s)}" aria-pressed="${filt.subject === s}">${s ? (ICONS[s] || "") + " " + esc(s) : "All subjects"}</button>`).join("")}</div>
       <div class="filters">
-        <label class="f">Subject<select data-f="subject"><option value="">All</option>${opts(SUBJECTS, filt.subject)}</select></label>
         <label class="f">Grade<select data-f="grade"><option value="">All</option>${opts(GRADES, filt.grade)}</select></label>
         <label class="f">Topic<select data-f="topic"><option value="">All</option>${opts(topics, filt.topic)}</select></label>
         <label class="f">Difficulty<select data-f="diff"><option value="">All</option>${opts(DIFFS, filt.diff)}</select></label>
-        <label class="f">Sort by<select data-f="sort"><option value="newest" ${filt.sort === "newest" ? "selected" : ""}>Newest</option><option value="popular" ${filt.sort === "popular" ? "selected" : ""}>Most popular</option></select></label>
+        <label class="f">Sort by<select data-f="sort"><option value="newest" ${filt.sort === "newest" ? "selected" : ""}>Newest</option><option value="popular" ${filt.sort === "popular" ? "selected" : ""}>Most popular</option><option value="az" ${filt.sort === "az" ? "selected" : ""}>A–Z</option><option value="rating" ${filt.sort === "rating" ? "selected" : ""}>Top rated</option></select></label>
       </div>
       <div id="results"></div>
-      <div class="notice" style="margin-top:28px">Can't find what you need? <a href="#/request"><b>Request a worksheet</b></a> and we may create it.</div></div>`;
+      <div class="notice" style="margin-top:28px">Can't find what you need? <a href="#/request" data-prefill><b>Request a worksheet</b></a> and we may create it.</div></div>`;
     },
 
     request() {
+      const prefillTopic = pendingTopic; pendingTopic = "";
       return `<div class="wrap section"><div class="page-head" style="text-align:center"><h1>Request a Worksheet</h1><p class="muted">Tell us what you need help with. Your name is only seen by the admins, never shown publicly.</p></div>
       <form class="form" id="reqForm">
         <div class="row">
@@ -157,20 +171,20 @@
         </div>
         <label class="f">Your full name<input type="text" name="fullName" required maxlength="80" autocomplete="name" placeholder="e.g. Alex Smith">
           <span class="meta" style="font-weight:400">🔒 Your name is private. It is only seen by the website admins and is never shown publicly.</span></label>
-        <label class="f">Topic<input type="text" name="topic" required maxlength="80" placeholder="e.g. Fractions, Photosynthesis, Creative writing"></label>
+        <label class="f">Topic<input type="text" name="topic" required maxlength="80" list="topicList" value="${esc(prefillTopic)}" placeholder="e.g. Fractions, Photosynthesis, Creative writing"><datalist id="topicList">${[...new Set(db.ws().map((w) => w.topic).concat(db.rq().map((r) => r.topic)))].map((t) => `<option value="${esc(t)}">`).join("")}</datalist><span class="hint" id="dupHint"></span></label>
         <div class="row">
           <label class="f">Difficulty<select name="difficulty" required>${opts(DIFFS, "Medium")}</select></label>
           <label class="f">What type of worksheet would you like?<select name="type" required>${opts(TYPES)}</select></label>
         </div>
-        <label class="f">Additional information (optional)<textarea name="info" maxlength="600" placeholder="e.g. I understand basic fractions but I need more practice adding fractions with different denominators."></textarea></label>
-        <button class="btn lg" type="submit">Submit Request</button>
+        <label class="f">Additional information (optional)<textarea name="info" maxlength="600" data-count placeholder="e.g. I understand basic fractions but I need more practice adding fractions with different denominators."></textarea></label>
+        <button class="btn lg" type="submit">Submit request</button>
       </form></div>`;
     },
 
     confirmed() {
-      return `<div class="wrap section" style="padding:40px 20px"><div class="confirm"><div class="big">🎉</div><h1>Request Received!</h1>
+      return `<div class="wrap section" style="padding:40px 20px"><div class="confirm"><div class="big" aria-hidden="true">✓</div><h1>Request received</h1>
       <p>Thank you for requesting a worksheet. Your request will be reviewed and may be added to WorksheetHub.</p>
-      <div style="display:flex;gap:12px;justify-content:center;flex-wrap:wrap"><a class="btn" href="#/requests">See Requests</a><a class="btn ghost" href="#/worksheets">Browse Worksheets</a></div></div></div>`;
+      <div style="display:flex;gap:12px;justify-content:center;flex-wrap:wrap"><a class="btn" href="#/requests">See requests</a><a class="btn ghost" href="#/worksheets">Browse worksheets</a></div></div></div>`;
     },
 
     requests() {
@@ -201,7 +215,7 @@
       const ri = ratingInfo(); const avg = ri ? ri.avg : "–";
       return `<div class="wrap"><div class="page-head" style="text-align:center"><h1>Feedback</h1><p class="muted">Tell us how to make WorksheetHub better. Average worksheet rating so far: <b>${avg} ⭐</b></p></div>
       <form class="form" id="genFb">
-        <label class="f">Your feedback<textarea name="text" required maxlength="800" placeholder="What do you like? What could be better? Found a mistake?"></textarea></label>
+        <label class="f">Your feedback<textarea name="text" required maxlength="800" data-count placeholder="What do you like? What could be better? Found a mistake?"></textarea></label>
         <button class="btn" type="submit">Send Feedback</button>
       </form></div>`;
     },
@@ -216,14 +230,17 @@
       <h1 style="margin-top:10px">${esc(w.title)}</h1>
       <div class="meta">Topic: <b>${esc(w.topic)}</b> · Uploaded ${fmtDate(w.date)}${avg ? ` · ⭐ ${avg} (${fbs.length})` : ""}</div></div>
       <div class="card" style="gap:16px"><p>${esc(w.description)}</p>
-        <div class="actions"><a class="btn" href="${esc(safeUrl(w.file))}" target="_blank" rel="noopener" data-dl="${esc(w.id)}">⬇ Download PDF</a>
-        ${safeUrl(w.answers) ? `<a class="btn ghost" href="${esc(safeUrl(w.answers))}" target="_blank" rel="noopener">Answer Sheet</a>` : ""}</div>
-        <div class="notice">✅ This worksheet was created with AI assistance and checked by the website creator before publication.</div></div>
+        <div class="actions"><a class="btn" href="${esc(safeUrl(w.file))}" target="_blank" rel="noopener" data-dl="${esc(w.id)}">Download PDF</a>
+        ${safeUrl(w.answers) ? `<a class="btn ghost" href="${esc(safeUrl(w.answers))}" target="_blank" rel="noopener">Answer sheet</a>` : ""}
+        <button class="btn plain" id="shareBtn">Share</button></div>
+        <div class="notice ok">✅ This worksheet was created with AI assistance and checked by the website creator before publication.</div></div>
+      ${adHtml()}
       <div class="card" style="margin-top:20px;gap:16px" id="fbBox"><h3>Was this worksheet helpful?</h3>
         <div class="thumbs"><button class="btn ghost" data-help="1">👍 Yes</button><button class="btn ghost" data-help="0">👎 No</button></div>
         <div><b>Rate it</b><div class="stars" id="stars">${[1, 2, 3, 4, 5].map((n) => `<button data-star="${n}" aria-label="${n} stars">★</button>`).join("")}</div></div>
-        <label class="f">What could make this worksheet better? (optional)<textarea id="fbText" maxlength="600"></textarea></label>
-        <button class="btn" id="fbSend">Send Feedback</button></div></div>`;
+        <label class="f">What could make this worksheet better? (optional)<textarea id="fbText" maxlength="600" data-count></textarea></label>
+        <button class="btn" id="fbSend">Send feedback</button></div>
+      ${related(w)}</div>`;
     },
 
     admin() {
@@ -309,10 +326,26 @@
       (!filt.subject || w.subject === filt.subject) && (!filt.grade || w.grade === filt.grade) &&
       (!filt.topic || w.topic === filt.topic) && (!filt.diff || w.difficulty === filt.diff) &&
       (!q || q.split(" ").every((t) => (w.title + " " + w.topic + " " + w.subject + " " + w.description + " " + w.grade).toLowerCase().includes(t))));
-    list.sort((a, b) => filt.sort === "popular" ? pop(b) - pop(a) : b.date.localeCompare(a.date));
-    box.innerHTML = list.length ? `<p class="meta">${list.length} worksheet${list.length > 1 ? "s" : ""} found</p><div class="grid">${list.map(wsCard).join("")}</div>`
-      : `<div class="empty"><div style="font-size:2.5rem">🔎</div><p>No worksheets match your search.</p><a class="btn" href="#/request">Request this worksheet</a></div>`;
+    const rat = (w) => { const r = ratingInfo(w.id); return r ? +r.avg : 0; };
+    const sorters = { popular: (a, b) => pop(b) - pop(a), az: (a, b) => a.title.localeCompare(b.title), rating: (a, b) => rat(b) - rat(a), newest: (a, b) => b.date.localeCompare(a.date) };
+    list.sort(sorters[filt.sort] || sorters.newest);
+    const active = filt.q || filt.subject || filt.grade || filt.topic || filt.diff;
+    const bar = `<div class="results-bar"><span class="meta">${list.length} worksheet${list.length === 1 ? "" : "s"}</span>${active ? `<button class="btn sm plain" id="clearF">Clear filters</button>` : ""}</div>`;
+    box.innerHTML = list.length ? `${bar}<div class="grid">${list.map((w) => wsCard(w, true)).join("")}</div>`
+      : `${bar}<div class="empty"><div class="em-ico">🔎</div><p>No worksheets match${filt.q ? ` “${esc(filt.q)}”` : ""}.</p><a class="btn" href="#/request" data-prefill>Request this worksheet</a></div>`;
+    const c = $("#clearF", box); if (c) c.addEventListener("click", () => { Object.assign(filt, { q: "", subject: "", grade: "", topic: "", diff: "" }); $("#navSearch").value = ""; render(); });
+    announce(`${list.length} worksheet${list.length === 1 ? "" : "s"} found`);
   }
+
+  function related(w) {
+    const r = db.ws().filter((x) => x.id !== w.id && (x.topic === w.topic || (x.subject === w.subject && x.grade === w.grade))).slice(0, 3);
+    return r.length ? `<h2 style="margin-top:40px">More like this</h2><div class="grid">${r.map((x) => wsCard(x)).join("")}</div>` : "";
+  }
+  // In-content A-ADS slot (same unit #2457354 as the footer banner)
+  const adHtml = () => `<aside class="ad-slot" style="padding:0;margin:28px auto" aria-label="Advertisement"><span class="ad-label">Advertisement</span><div class="ad-box"><iframe data-aa="2457354" src="//acceptable.a-ads.com/2457354/?size=Adaptive" title="Advertisement" loading="lazy"></iframe></div></aside>`;
+  const announce = (m) => { const l = $("#live"); if (l) l.textContent = m; };
+  let pendingTopic = "";
+  const TITLES = { home: "", worksheets: "Worksheets", request: "Request a worksheet", requests: "Requests", about: "About", feedback: "Feedback", admin: "Admin", confirmed: "Request received" };
 
   // ---------- router ----------
   function render() {
@@ -325,33 +358,51 @@
     else if (route === "confirmed") html = views.confirmed();
     else html = views.home();
     app.innerHTML = html; window.scrollTo(0, 0);
+    const wsT = route === "worksheet" && (db.ws().find((x) => x.id === arg) || {}).title;
+    document.title = (wsT || TITLES[route] ? (wsT || TITLES[route]) + " – " : "") + "WorksheetHub AI – Free student worksheets";
+    $("body > .ad-slot").hidden = route === "admin";
     document.querySelectorAll("nav a").forEach((a) => a.classList.toggle("active", a.dataset.r === (route === "worksheet" ? "worksheets" : route === "confirmed" ? "request" : route)));
-    $("#menu").classList.remove("open");
+    $("#menu").classList.remove("open"); $("#burger").setAttribute("aria-expanded", "false");
     bind(route, arg);
+    document.querySelectorAll("textarea[data-count]").forEach((t) => {
+      const c = document.createElement("span"); c.className = "counter"; t.after(c);
+      const u = () => (c.textContent = `${t.value.length} / ${t.maxLength}`); t.addEventListener("input", u); u();
+    });
   }
 
   function bind(route, arg) {
-    if (route === "home") $("#heroSearch").addEventListener("keydown", (e) => { if (e.key === "Enter") goSearch(e.target.value); });
+    if (route === "home") $("#heroForm").addEventListener("submit", (e) => { e.preventDefault(); goSearch($("#heroSearch").value); });
     if (route === "worksheets") {
       renderResults();
       $("#libSearch").addEventListener("input", (e) => { filt.q = e.target.value; $("#navSearch").value = filt.q; renderResults(); });
-      document.querySelectorAll("[data-f]").forEach((s) => s.addEventListener("change", () => { filt[s.dataset.f] = s.value; renderResults(); }));
+      document.querySelectorAll("[data-f]").forEach((s) => s.addEventListener("change", () => { filt[s.dataset.f] = s.value; s.dataset.f === "subject" ? render() : renderResults(); }));
+      document.querySelectorAll("[data-chip]").forEach((b) => b.addEventListener("click", () => { filt.subject = b.dataset.chip; render(); }));
+    }
+    if (route === "request") {
+      const ti = $("#reqForm [name=topic]"), hint = $("#dupHint");
+      const check = () => {
+        const t = norm(ti.value); if (t.length < 3) return (hint.innerHTML = "");
+        const ws = db.ws().find((w) => norm(w.topic).includes(t) || norm(w.title).includes(t));
+        const n = db.rq().filter((r) => norm(r.topic) === t).length;
+        hint.innerHTML = ws ? `💡 We already have <a href="#/worksheet/${esc(ws.id)}">${esc(ws.title)}</a>` : n ? `${n} other student${n > 1 ? "s have" : " has"} asked for this – your request helps it get made sooner.` : "";
+      };
+      ti.addEventListener("input", check); check();
     }
     if (route === "request") $("#reqForm").addEventListener("submit", (e) => {
       e.preventDefault(); const d = Object.fromEntries(new FormData(e.target));
       const row = { fullName: d.fullName.trim(), subject: d.subject, grade: d.grade, topic: d.topic.trim(), difficulty: d.difficulty, type: d.type, info: (d.info || "").trim() };
       if (REMOTE) {
-        const btn = $("button[type=submit]", e.target); btn.disabled = true; btn.textContent = "Sending…";
+        const btn = $("button[type=submit]", e.target); busy(btn, "Sending…");
         api(Object.assign({ action: "request" }, row)).then((r) => { if (!r.ok) throw new Error(r.error); return loadPublic(); }).then(() => (location.hash = "#/confirmed"))
-          .catch(() => { btn.disabled = false; btn.textContent = "Submit Request"; toast("Could not send. Please try again."); });
+          .catch(() => { busy(btn); toast("Could not send. Please try again."); });
         return;
       }
       const rq = db.rq(); rq.push(Object.assign({ id: uid(), date: today(), status: "Requested", link: "" }, row));
       db.setRq(rq); location.hash = "#/confirmed";
     });
     if (route === "feedback") $("#genFb").addEventListener("submit", (e) => {
-      e.preventDefault(); const f = e.target;
-      sendFeedback({ wsId: null, text: new FormData(f).get("text").trim() }).then(() => { f.reset(); toast("Thank you for your feedback!"); }).catch(() => toast("Could not send. Please try again."));
+      e.preventDefault(); const f = e.target, btn = $("button", f); busy(btn, "Sending…");
+      sendFeedback({ wsId: null, text: new FormData(f).get("text").trim() }).then((r) => { if (r && r.ok === false) throw 0; f.reset(); f.querySelector("textarea").dispatchEvent(new Event("input")); toast("Thank you for your feedback!"); }).catch(() => toast("Could not send. Please try again.")).finally(() => busy(btn));
     });
     if (route === "worksheet") bindFeedback(arg);
     if (route === "admin") bindAdmin();
@@ -362,10 +413,17 @@
     const box = $("#fbBox");
     box.querySelectorAll("[data-help]").forEach((b) => b.addEventListener("click", () => { helpful = b.dataset.help === "1"; box.querySelectorAll("[data-help]").forEach((x) => x.classList.toggle("sel", x === b)); }));
     box.querySelectorAll("[data-star]").forEach((b) => b.addEventListener("click", () => { rating = +b.dataset.star; box.querySelectorAll("[data-star]").forEach((x) => x.classList.toggle("on", +x.dataset.star <= rating)); }));
+    box.querySelectorAll("[data-star]").forEach((b) => b.setAttribute("aria-label", `${b.dataset.star} star${b.dataset.star > 1 ? "s" : ""}`));
+    const sh = $("#shareBtn");
+    if (sh) sh.addEventListener("click", async () => {
+      const url = location.href;
+      try { if (navigator.share) await navigator.share({ title: document.title, url }); else { await navigator.clipboard.writeText(url); toast("Link copied"); } } catch (e) {}
+    });
     $("#fbSend").addEventListener("click", () => {
-      const text = $("#fbText").value.trim();
+      const text = $("#fbText").value.trim(), btn = $("#fbSend");
       if (helpful === null && !rating && !text) return toast("Pick a rating, 👍/👎 or write something first");
-      sendFeedback({ wsId: id, helpful, rating, text }).then(() => { box.innerHTML = `<h3>Thank you! 🎉</h3><p>Your feedback helps us improve future worksheets.</p>`; }).catch(() => toast("Could not send. Please try again."));
+      busy(btn, "Sending…");
+      sendFeedback({ wsId: id, helpful, rating, text }).then((r) => { if (r && r.ok === false) throw 0; box.innerHTML = `<h3>Thank you! 🎉</h3><p>Your feedback helps us improve future worksheets.</p>`; }).catch(() => { busy(btn); toast("Could not send. Please try again."); });
     });
   }
 
@@ -429,19 +487,30 @@
   function goSearch(q) { filt.q = q; $("#navSearch").value = q; if (location.hash === "#/worksheets") render(); else location.hash = "#/worksheets"; }
 
   // ---------- global ----------
-  document.addEventListener("click", (e) => { const a = e.target.closest("[data-dl]"); if (a) bump(a.dataset.dl, "downloads"); });
+  document.addEventListener("click", (e) => {
+    const a = e.target.closest("[data-dl]"); if (a) bump(a.dataset.dl, "downloads");
+    if (e.target.closest("[data-prefill]")) pendingTopic = filt.q.trim();
+  });
+  document.addEventListener("keydown", (e) => {
+    const typing = /INPUT|TEXTAREA|SELECT/.test(document.activeElement.tagName);
+    if (e.key === "/" && !typing) { e.preventDefault(); ($("#libSearch") || $("#navSearch")).focus(); }
+    if (e.key === "Escape") { $("#menu").classList.remove("open"); $("#burger").setAttribute("aria-expanded", "false"); if (typing) document.activeElement.blur(); }
+  });
+  const tt = $("#toTop");
+  window.addEventListener("scroll", () => tt.classList.toggle("show", scrollY > 700), { passive: true });
+  tt.addEventListener("click", () => scrollTo({ top: 0, behavior: "smooth" }));
   $("#navSearch").addEventListener("input", (e) => {
     filt.q = e.target.value;
     if (location.hash === "#/worksheets") { const l = $("#libSearch"); if (l) l.value = filt.q; renderResults(); } else if (filt.q.trim()) location.hash = "#/worksheets";
   });
-  $("#burger").addEventListener("click", () => $("#menu").classList.toggle("open"));
+  $("#burger").addEventListener("click", () => { const o = $("#menu").classList.toggle("open"); $("#burger").setAttribute("aria-expanded", String(o)); });
   window.addEventListener("hashchange", render);
   if (REMOTE) {
-    app.innerHTML = '<div class="wrap"><div class="empty" style="margin-top:40px">Loading…</div></div>';
+    app.innerHTML = `<div class="wrap" aria-busy="true"><div class="page-head"><div class="skel" style="height:44px;width:50%"></div></div><div class="grid">${'<div class="skel skel-card"></div>'.repeat(6)}</div></div>`;
     (async () => {
       await loadPublic();
       if (session.token) await loadAdmin();
-      if (mem.failed) toast("Could not reach the server. Showing nothing for now.");
+      if (mem.failed) toast("Could not reach the server. Please refresh to try again.");
       render();
     })();
   } else render();

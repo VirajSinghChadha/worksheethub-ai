@@ -2,34 +2,54 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>WorksheetHub AI – Free student worksheets</title>
 <meta name="description" content="Free practice worksheets for Grade 6 and 7 students. Request a worksheet and we may create it for you.">
+<meta name="theme-color" content="#f5f5f7" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#000000" media="(prefers-color-scheme: dark)">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ctext y='.9em' font-size='90'%3E📘%3C/text%3E%3C/svg%3E">
 <link rel="stylesheet" href="styles.css">
 </head>
 <body>
+<a class="skip" href="#app">Skip to content</a>
 <header class="nav">
   <div class="nav-inner">
-    <a class="brand" href="#/">📘 WorksheetHub <span>AI</span></a>
-    <button class="burger" id="burger" aria-label="Menu">☰</button>
-    <nav id="menu">
+    <a class="brand" href="#/"><span class="logo" aria-hidden="true">📘</span>WorksheetHub&nbsp;<span>AI</span></a>
+    <button class="burger" id="burger" aria-label="Open menu" aria-expanded="false" aria-controls="menu">☰</button>
+    <nav id="menu" aria-label="Main">
       <a href="#/" data-r="home">Home</a>
       <a href="#/worksheets" data-r="worksheets">Worksheets</a>
-      <a href="#/request" data-r="request">Request Worksheet</a>
+      <a href="#/request" data-r="request">Request</a>
       <a href="#/requests" data-r="requests">Requests</a>
       <a href="#/about" data-r="about">About</a>
       <a href="#/feedback" data-r="feedback">Feedback</a>
     </nav>
-    <input id="navSearch" class="nav-search" type="search" placeholder="🔍 Search worksheets…" aria-label="Search worksheets">
+    <input id="navSearch" class="nav-search" type="search" placeholder="Search  ( / )" aria-label="Search worksheets">
   </div>
 </header>
 
-<main id="app"></main>
+<main id="app" tabindex="-1"></main>
+
+<!-- A-ADS ad unit #2457354 -->
+<aside class="ad-slot" aria-label="Advertisement">
+  <span class="ad-label">Advertisement</span>
+  <div class="ad-box">
+    <div id="frame" style="width:100%;margin:auto;position:relative;z-index:1;">
+      <iframe data-aa="2457354" src="//acceptable.a-ads.com/2457354/?size=Adaptive" title="Advertisement" loading="lazy"></iframe>
+    </div>
+  </div>
+</aside>
 
 <footer class="footer">
-  <div>📘 WorksheetHub AI – a student-created Service as Action project. Every worksheet is checked before publication.</div>
+  <nav aria-label="Footer">
+    <a href="#/worksheets">Worksheets</a><a href="#/request">Request</a><a href="#/about">About</a><a href="#/feedback">Feedback</a>
+  </nav>
+  <div>WorksheetHub AI – a student-created Service as Action project. Every worksheet is checked before publication.</div>
   <a href="#/admin" class="admin-link">Admin</a>
 </footer>
+
+<button class="to-top" id="toTop" aria-label="Back to top">↑</button>
+<div id="live" class="sr-only" aria-live="polite"></div>
 
 <script src="config.js"></script>
 <script src="data.js"></script>
